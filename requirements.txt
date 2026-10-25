@@ -1,0 +1,8 @@
+streamlit>=1.30.0
+pandas>=2.0.0
+folium>=0.15.0
+streamlit-folium>=0.17.0
+plotly>=5.18.0
+openpyxl>=3.1.2
+pyproj>=3.6.0
+pillow>=10.0.0
