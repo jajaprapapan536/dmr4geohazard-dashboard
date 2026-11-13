@@ -268,7 +268,16 @@ def get_photos(inspection_id: int) -> list[dict]:
     cursor.execute("SELECT * FROM inspection_photos WHERE inspection_id = ? ORDER BY id ASC", (inspection_id,))
     rows = cursor.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        raw_path = d.get("file_path", "")
+        fname = os.path.basename(raw_path)
+        local_target = os.path.join(PHOTOS_DIR, fname)
+        if os.path.exists(local_target):
+            d["file_path"] = local_target
+        result.append(d)
+    return result
 
 
 def get_inspection(record_id: int) -> dict | None:
@@ -277,7 +286,20 @@ def get_inspection(record_id: int) -> dict | None:
     cursor.execute("SELECT * FROM inspections WHERE id = ?", (record_id,))
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("one_page_path"):
+        fname = os.path.basename(d["one_page_path"])
+        loc = os.path.join(ONEPAGE_DIR, fname)
+        if os.path.exists(loc):
+            d["one_page_path"] = loc
+    if d.get("report_file_path"):
+        fname = os.path.basename(d["report_file_path"])
+        loc = os.path.join(REPORTS_DIR, fname)
+        if os.path.exists(loc):
+            d["report_file_path"] = loc
+    return d
 
 
 def get_all_inspections() -> pd.DataFrame:

@@ -231,7 +231,7 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
         with map_col2:
             basemap_choice = st.selectbox(
                 "ชั้นข้อมูลแผนที่ฐาน (Basemap)",
-                ["ภาพถ่ายดาวเทียม (Esri Satellite)", "แผนที่ถนน (OpenStreetMap)", "แผนที่ภูมิประเทศ (CartoDB Positron)"],
+                ["แผนที่ถนน (OpenStreetMap)", "ภาพถ่ายดาวเทียม (Esri Satellite)", "แผนที่ภูมิประเทศ (CartoDB Positron)"],
                 index=0
             )
             use_cluster = st.checkbox("จัดกลุ่มหมุดพิกัด (Cluster Markers)", value=True)
@@ -239,7 +239,7 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
         with map_col1:
             st.caption("💡 เลื่อนเมาส์หรือคลิกที่หมุดเพื่อดูข้อมูลเหตุการณ์ ปีงบประมาณ พิกัด UTM และรายละเอียดการตรวจสอบ")
 
-        # Create Folium Map
+        # Create Folium Map with default working tiles
         if not filtered_df.empty:
             avg_lat = filtered_df["latitude"].mean()
             avg_lon = filtered_df["longitude"].mean()
@@ -249,22 +249,14 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
             avg_lon = 99.2
             initial_zoom = 7
 
-        m = folium.Map(
-            location=[avg_lat, avg_lon],
-            zoom_start=initial_zoom,
-            tiles=None,
-            control_scale=True
-        )
-
-        # Add Basemaps
         if basemap_choice == "ภาพถ่ายดาวเทียม (Esri Satellite)":
-            folium.TileLayer(
+            m = folium.Map(
+                location=[avg_lat, avg_lon],
+                zoom_start=initial_zoom,
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                 attr="Esri World Imagery",
-                name="Esri Satellite",
-                overlay=False,
-                control=True
-            ).add_to(m)
+                control_scale=True
+            )
             folium.TileLayer(
                 tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
                 attr="Esri Boundaries",
@@ -272,12 +264,39 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
                 overlay=True,
                 control=True
             ).add_to(m)
-        elif basemap_choice == "แผนที่ถนน (OpenStreetMap)":
-            folium.TileLayer("OpenStreetMap", name="OpenStreetMap").add_to(m)
+        elif basemap_choice == "แผนที่ภูมิประเทศ (CartoDB Positron)":
+            m = folium.Map(
+                location=[avg_lat, avg_lon],
+                zoom_start=initial_zoom,
+                tiles="CartoDB Positron",
+                control_scale=True
+            )
         else:
-            folium.TileLayer("CartoDB Positron", name="CartoDB Positron").add_to(m)
+            m = folium.Map(
+                location=[avg_lat, avg_lon],
+                zoom_start=initial_zoom,
+                tiles="OpenStreetMap",
+                control_scale=True
+            )
 
         Fullscreen(position="topright").add_to(m)
+
+        # Helper to encode local photo thumbnail safely as base64 Data URI
+        import base64
+        import html as html_lib
+
+        def get_photo_data_uri(filepath: str) -> str:
+            try:
+                if filepath and os.path.exists(filepath):
+                    with Image.open(filepath) as im:
+                        im.thumbnail((180, 140))
+                        buf = io.BytesIO()
+                        im.save(buf, format="JPEG", quality=75)
+                        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        return f"data:image/jpeg;base64,{b64}"
+            except Exception:
+                pass
+            return ""
 
         # Add Markers
         marker_container = MarkerCluster().add_to(m) if use_cluster else m
@@ -288,7 +307,13 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
             photos = db.get_photos(row["id"])
             photo_html = ""
             if photos:
-                photo_html = f"<div style='margin-top:8px;'><img src='file:///{photos[0]['file_path']}' style='max-width:180px; border-radius:6px;'><br><small style='color:#666;'>{photos[0].get('caption','')}</small></div>"
+                first_photo = photos[0]["file_path"]
+                data_uri = get_photo_data_uri(first_photo)
+                if data_uri:
+                    caption_esc = html_lib.escape(str(photos[0].get('caption', '') or ''))
+                    photo_html = f"<div style='margin-top:8px;'><img src='{data_uri}' style='max-width:180px; border-radius:6px;'><br><small style='color:#666;'>{caption_esc}</small></div>"
+                else:
+                    photo_html = f"<div style='margin-top:6px; color:#2563EB; font-size:11px;'>📷 มีรูปสำรวจ ({len(photos)} รูป)</div>"
 
             fy_display = f"ปีงบ {row['fiscal_year']}" if pd.notna(row.get('fiscal_year')) else ""
 
@@ -299,21 +324,30 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
             if row.get("report_file_path"):
                 badge_html += "<span style='background:#DCFCE7; color:#166534; font-size:10px; padding:2px 6px; border-radius:10px; margin-right:4px;'>📑 มีรายงาน</span>"
 
+            s_code = html_lib.escape(str(row.get('incident_code', '')))
+            s_type = html_lib.escape(str(row.get('hazard_type', '')))
+            s_date = html_lib.escape(str(row.get('incident_date', '')))
+            s_loc = html_lib.escape(str(row.get('location_name', '')))
+            s_sub = html_lib.escape(str(row.get('subdistrict', '')))
+            s_dis = html_lib.escape(str(row.get('district', '')))
+            s_prov = html_lib.escape(str(row.get('province', '')))
+            s_det = html_lib.escape(str(row.get('details', ''))[:160]).replace('\n', '<br>')
+
             popup_content = f"""
-            <div style="font-family:sans-serif; width:270px;">
-                <div style="font-weight:bold; font-size:14px; color:#1E3A8A; border-bottom:1px solid #ccc; padding-bottom:4px;">
-                    {row['incident_code']} <span style="font-size:11px; color:#0284C7;">({fy_display})</span>
+            <div style="font-family:sans-serif; width:260px;">
+                <div style="font-weight:bold; font-size:13px; color:#1E3A8A; border-bottom:1px solid #ccc; padding-bottom:4px;">
+                    {s_code} <span style="font-size:11px; color:#0284C7;">({fy_display})</span>
                 </div>
-                <div style="margin-top:6px; font-size:12px;">
-                    <b>ประเภท:</b> <span style="color:#DC2626; font-weight:bold;">{row['hazard_type']}</span><br>
-                    <b>วันที่:</b> {row['incident_date']}<br>
-                    <b>สถานที่:</b> {row['location_name']}<br>
-                    <b>ตำบล/อำเภอ/จ.:</b> ต.{row['subdistrict']} อ.{row['district']} จ.{row['province']}<br>
+                <div style="margin-top:6px; font-size:12px; line-height:1.4;">
+                    <b>ประเภท:</b> <span style="color:#DC2626; font-weight:bold;">{s_type}</span><br>
+                    <b>วันที่:</b> {s_date}<br>
+                    <b>สถานที่:</b> {s_loc}<br>
+                    <b>ตำบล/อำเภอ/จ.:</b> ต.{s_sub} อ.{s_dis} จ.{s_prov}<br>
                     <b>พิกัด UTM (Z{row['utm_zone']}):</b> {row['utm_e']:,.0f} E, {row['utm_n']:,.0f} N<br>
                     <b>พิกัด Lat/Lon:</b> {row['latitude']:.5f}, {row['longitude']:.5f}<br>
                     <div style="margin:4px 0;">{badge_html}</div>
                     <div style="margin-top:6px; font-size:11px; color:#374151; background:#F3F4F6; padding:6px; border-radius:4px; max-height:80px; overflow-y:auto;">
-                        <b>รายละเอียด:</b> {str(row.get('details', ''))[:160]}...
+                        <b>รายละเอียด:</b> {s_det}...
                     </div>
                     {photo_html}
                 </div>
@@ -323,11 +357,14 @@ if menu == "📊 แดชบอร์ดและแผนที่ (Dashboard 
             folium.Marker(
                 location=[row["latitude"], row["longitude"]],
                 popup=folium.Popup(popup_content, max_width=300),
-                tooltip=f"[{row['hazard_type']}] {row['location_name']} จ.{row['province']} ({fy_display})",
+                tooltip=f"[{s_type}] {s_loc} จ.{s_prov} ({fy_display})",
                 icon=folium.Icon(color=marker_color, icon="info-sign")
             ).add_to(marker_container)
 
-        st_folium(m, width="100%", height=550, returned_objects=[])
+        try:
+            st_folium(m, use_container_width=True, height=550, returned_objects=[])
+        except Exception:
+            st.components.v1.html(m.get_root().render(), height=550)
 
         # Charts Section
         st.markdown("### 📈 การวิเคราะห์เชิงสถิติ (Hazard Analytics)")
